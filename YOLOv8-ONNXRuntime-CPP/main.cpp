@@ -58,6 +58,92 @@ void Detector(YOLO_V8*& p) {
 }
 
 
+void VideoDetector(YOLO_V8*& p) {
+    std::filesystem::path current_path = std::filesystem::current_path();
+    std::filesystem::path imgs_path = current_path / "images";
+    for (auto& i : std::filesystem::directory_iterator(imgs_path))
+    {
+        if (i.path().extension() == ".mp4")
+        {
+            std::string videoPath = i.path();
+            std::cout<<1<<std::endl;
+            // 打开视频文件
+            cv::VideoCapture capture(videoPath);
+
+            // 检查视频是否成功打开
+            if (!capture.isOpened()) {
+                std::cout << "Error opening video stream or file\n";
+                exit(-1);
+            }
+
+            cv::Mat img;
+
+            // 逐帧读取视频
+            while (capture.read(img)) {
+                if (img.empty()) {
+                    std::cout << "ERROR! blank frame grabbed\n";
+                    break;
+                }
+
+                // YOLOv8
+//                cv::Mat img = cv::imread(img_path);
+                std::vector<DL_RESULT> res;
+                p->RunSession(img, res);
+
+                for (auto& re : res)
+                {
+                    if(re.classId>0){
+                        continue;
+                    }
+
+                    cv::RNG rng(cv::getTickCount());
+                    cv::Scalar color(rng.uniform(0, 256), rng.uniform(0, 256), rng.uniform(0, 256));
+
+                    cv::rectangle(img, re.box, color, 3);
+
+                    float confidence = floor(100 * re.confidence) / 100;
+                    std::cout << std::fixed << std::setprecision(2);
+                    std::string label = p->classes[re.classId] + " " +
+                                        std::to_string(confidence).substr(0, std::to_string(confidence).size() - 4);
+
+                    cv::rectangle(
+                            img,
+                            cv::Point(re.box.x, re.box.y - 25),
+                            cv::Point(re.box.x + label.length() * 15, re.box.y),
+                            color,
+                            cv::FILLED
+                    );
+
+                    cv::putText(
+                            img,
+                            label,
+                            cv::Point(re.box.x, re.box.y - 5),
+                            cv::FONT_HERSHEY_SIMPLEX,
+                            0.75,
+                            cv::Scalar(0, 0, 0),
+                            2
+                    );
+                }
+
+
+                // 显示当前帧
+                cv::imshow("Frame", img);
+
+                // 等待按键事件，如果按下'q'键，则退出循环
+                char c = (char) cv::waitKey(25);
+                if (c == 'q' || c == 27) { // 27 is ASCII code for ESC
+                    break;
+                }
+            }
+
+            // 释放VideoCapture对象
+            capture.release();
+            cv::destroyAllWindows();
+        }
+    }
+}
+
+
 void Classifier(YOLO_V8*& p)
 {
     std::filesystem::path current_path = std::filesystem::current_path();
@@ -174,6 +260,34 @@ void DetectTest()
     Detector(yoloDetector);
 }
 
+void VideoDetectTest()
+{
+    YOLO_V8* yoloDetector = new YOLO_V8;
+    ReadCocoYaml(yoloDetector);
+    DL_INIT_PARAM params;
+    params.rectConfidenceThreshold = 0.5;
+    params.iouThreshold = 0.5;
+    params.modelPath = "yolov8n.onnx";
+    params.imgSize = { 640, 640 };
+#ifdef USE_CUDA
+    params.cudaEnable = true;
+
+    // GPU FP32 inference
+    params.modelType = YOLO_DETECT_V8;
+    // GPU FP16 inference
+    //Note: change fp16 onnx model
+    //params.modelType = YOLO_DETECT_V8_HALF;
+
+#else
+    // CPU inference
+    params.modelType = YOLO_DETECT_V8;
+    params.cudaEnable = false;
+
+#endif
+    yoloDetector->CreateSession(params);
+    VideoDetector(yoloDetector);
+}
+
 
 void ClsTest()
 {
@@ -188,6 +302,7 @@ void ClsTest()
 
 int main()
 {
-    DetectTest();
+    VideoDetectTest();
+//    DetectTest();
 //    ClsTest();
 }
